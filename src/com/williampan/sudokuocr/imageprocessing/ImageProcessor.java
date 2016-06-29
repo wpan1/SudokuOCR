@@ -2,6 +2,8 @@ package com.williampan.sudokuocr.imageprocessing;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 
 import org.opencv.core.Core;
 import org.opencv.core.CvType;
@@ -15,6 +17,7 @@ import org.opencv.core.Scalar;
 import org.opencv.core.Size;
 import org.opencv.highgui.Highgui;
 import org.opencv.imgproc.Imgproc;
+import org.opencv.imgproc.Moments;
 
 public class ImageProcessor {
 	
@@ -38,6 +41,7 @@ public class ImageProcessor {
 		Mat andImage = Mat.zeros(maskedImage.size(), CvType.CV_8UC3);
 		Core.bitwise_and(vertImage, horImage, andImage);
 		Highgui.imwrite("afterBitAnd.png", andImage);
+		findCentroids(andImage, maskedImage);
 	}
 	
 	/**
@@ -150,13 +154,13 @@ public class ImageProcessor {
 		Mat processedImage = new Mat(image.size(), Core.DEPTH_MASK_ALL);
 		Imgproc.cvtColor(image, processedImage, Imgproc.COLOR_BGR2GRAY);
 		// Guassian blur
-		Imgproc.GaussianBlur(processedImage, processedImage, new Size(5,5), 0);	
+		//Imgproc.GaussianBlur(processedImage, processedImage, new Size(5,5), 0);	
 		
 		// Kernel to morph line thickness
 		Mat kernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(2,10));
 		// Process image so that vertical lines can be found
 		Highgui.imwrite("beforesobel.png", processedImage);
-		Imgproc.Sobel(processedImage, processedImage, CvType.CV_64F, 1, 0);
+		Imgproc.Sobel(processedImage, processedImage, CvType.CV_16S, 1, 0);
 		Core.convertScaleAbs(processedImage, processedImage);
 		Core.normalize(processedImage, processedImage, 0, 255, Core.NORM_MINMAX);
 		Highgui.imwrite("beforethresh.png", processedImage);
@@ -194,17 +198,19 @@ public class ImageProcessor {
 		Mat processedImage = new Mat(image.size(), Core.DEPTH_MASK_ALL);
 		Imgproc.cvtColor(image, processedImage, Imgproc.COLOR_BGR2GRAY);
 		// Guassian blur
-		Imgproc.GaussianBlur(processedImage, processedImage, new Size(5,5), 0);	
+		//Imgproc.GaussianBlur(processedImage, processedImage, new Size(5,5), 0);	
 		
 		// Kernel to morph line thickness
 		Mat kernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(10,2));
-		// Process image so that vertical lines can be found
+		// Process image so that vertical lines can be found.
+		Highgui.imwrite("beforehorizontalsobel.png", processedImage);
 		Imgproc.Sobel(processedImage, processedImage, CvType.CV_8U, 0, 2);
+		Highgui.imwrite("afterhorizontalsobel.png", processedImage);
 		Core.convertScaleAbs(processedImage, processedImage);
 		Core.normalize(processedImage, processedImage, 0, 255, Core.NORM_MINMAX);
-		Imgproc.threshold(processedImage, processedImage, 0, 255, Imgproc.THRESH_BINARY+Imgproc.THRESH_OTSU);
+		Imgproc.threshold(processedImage, processedImage, 0, 255, Imgproc.THRESH_BINARY + Imgproc.THRESH_OTSU);
 		Highgui.imwrite("beforehorizontalmorph.png", processedImage);
-		Imgproc.morphologyEx(processedImage, processedImage, Imgproc.MORPH_DILATE, kernel);	
+		Imgproc.morphologyEx(processedImage, processedImage, Imgproc.MORPH_DILATE, kernel);
 		Highgui.imwrite("afterhorizontalmorph.png", processedImage);
 		
 		// Find all contours in processedprocessedImage
@@ -227,4 +233,68 @@ public class ImageProcessor {
 		//Imgproc.morphologyEx(lineImage, lineImage, Imgproc.MORPH_CLOSE, kernelzero);
 		Highgui.imwrite("afterHoriztonal.png", lineImage);
 	}
+	
+	/**
+	 * Generatre centroids at intersections of sudoku lines
+	 * @param image Image of and between horizontal and vertical lines
+	 * @param originalImage Image to draw centroids onto
+	 * @return ArrayList of centroids
+	 */
+	private ArrayList<Point> findCentroids(Mat image, Mat originalImage){
+		// Image preproccesing
+		Mat processedImage = new Mat(image.size(), Core.DEPTH_MASK_ALL);
+		Imgproc.cvtColor(image, processedImage, Imgproc.COLOR_BGR2GRAY);
+		// Morph inconsistencies
+		Mat kernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(5,5));
+		Imgproc.morphologyEx(processedImage, processedImage, Imgproc.MORPH_DILATE, kernel);
+		Highgui.imwrite("afterCentroidMorph.png", processedImage);
+		// Find all contours in Image
+		ArrayList<MatOfPoint> contours = new ArrayList<MatOfPoint>();
+		Imgproc.findContours(processedImage, contours, new Mat(), Imgproc.RETR_LIST, Imgproc.CHAIN_APPROX_SIMPLE);
+		
+		ArrayList<Point> centroids = new ArrayList<Point>();
+		for (MatOfPoint contour : contours){
+			Moments moment = Imgproc.moments(contour);
+			int x = (int)(moment.get_m10()/moment.get_m00());
+			int y = (int)(moment.get_m01()/moment.get_m00());
+			Point circleCentre = new Point(x,y);
+			Core.circle(originalImage, circleCentre, 4, new Scalar(0,255,0));
+			centroids.add(circleCentre);
+		}
+		
+		//Sorting centroids by order
+		Collections.sort(centroids, new Comparator<Point>() {
+				@Override
+				public int compare(Point point1, Point point2) {
+					// Not same line
+					if (Math.abs(point2.y - point1.y) > 10){
+						// Compare y values
+						if (point2.y > point1.y){
+							return -1;
+						}
+						return 1;
+					}
+					// Same line
+					else{
+						// Compare x values
+						if (point2.x > point1.x){
+							return -1;
+						}
+						return 1;
+					}
+				}
+		    });	
+		
+		// Display Centroids on image
+		int count = 0;	
+		for (Point point : centroids){
+			System.out.println(count + ": " + point.x + "," + point.y);
+			Core.putText(originalImage, String.valueOf(count), point, Core.FONT_HERSHEY_PLAIN, 1.0, new Scalar(0,0,255));
+			count += 1;
+		}
+		Highgui.imwrite("afterCentroids.png", originalImage);
+		
+		return centroids;
+	}
+	
 }
