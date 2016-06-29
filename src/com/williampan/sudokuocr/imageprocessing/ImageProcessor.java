@@ -41,9 +41,10 @@ public class ImageProcessor {
 		Mat andImage = Mat.zeros(maskedImage.size(), CvType.CV_8UC3);
 		Core.bitwise_and(vertImage, horImage, andImage);
 		Highgui.imwrite("afterBitAnd.png", andImage);
-		findCentroids(andImage, maskedImage);
+		ArrayList<Point> centroids = findCentroids(andImage, maskedImage);
+		transformImage(centroids, maskedImage);
 	}
-	
+
 	/**
 	 * Preprocess the image using blur and thresholding
 	 * @param image Input/Output image
@@ -154,10 +155,10 @@ public class ImageProcessor {
 		Mat processedImage = new Mat(image.size(), Core.DEPTH_MASK_ALL);
 		Imgproc.cvtColor(image, processedImage, Imgproc.COLOR_BGR2GRAY);
 		// Guassian blur
-		//Imgproc.GaussianBlur(processedImage, processedImage, new Size(5,5), 0);	
+		Imgproc.GaussianBlur(processedImage, processedImage, new Size(5,5), 0);	
 		
 		// Kernel to morph line thickness
-		Mat kernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(2,10));
+		Mat kernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(1,10));
 		// Process image so that vertical lines can be found
 		Highgui.imwrite("beforesobel.png", processedImage);
 		Imgproc.Sobel(processedImage, processedImage, CvType.CV_16S, 1, 0);
@@ -198,7 +199,7 @@ public class ImageProcessor {
 		Mat processedImage = new Mat(image.size(), Core.DEPTH_MASK_ALL);
 		Imgproc.cvtColor(image, processedImage, Imgproc.COLOR_BGR2GRAY);
 		// Guassian blur
-		//Imgproc.GaussianBlur(processedImage, processedImage, new Size(5,5), 0);	
+		Imgproc.GaussianBlur(processedImage, processedImage, new Size(5,5), 0);	
 		
 		// Kernel to morph line thickness
 		Mat kernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(10,2));
@@ -241,6 +242,9 @@ public class ImageProcessor {
 	 * @return ArrayList of centroids
 	 */
 	private ArrayList<Point> findCentroids(Mat image, Mat originalImage){
+		// Output image
+		Mat outImage = Mat.zeros(originalImage.size(), CvType.CV_32F);
+		Imgproc.cvtColor(originalImage, outImage, Imgproc.COLOR_BGR2GRAY);
 		// Image preproccesing
 		Mat processedImage = new Mat(image.size(), Core.DEPTH_MASK_ALL);
 		Imgproc.cvtColor(image, processedImage, Imgproc.COLOR_BGR2GRAY);
@@ -258,7 +262,7 @@ public class ImageProcessor {
 			int x = (int)(moment.get_m10()/moment.get_m00());
 			int y = (int)(moment.get_m01()/moment.get_m00());
 			Point circleCentre = new Point(x,y);
-			Core.circle(originalImage, circleCentre, 4, new Scalar(0,255,0));
+			Core.circle(outImage, circleCentre, 4, new Scalar(0,255,0));
 			centroids.add(circleCentre);
 		}
 		
@@ -288,13 +292,53 @@ public class ImageProcessor {
 		// Display Centroids on image
 		int count = 0;	
 		for (Point point : centroids){
-			System.out.println(count + ": " + point.x + "," + point.y);
-			Core.putText(originalImage, String.valueOf(count), point, Core.FONT_HERSHEY_PLAIN, 1.0, new Scalar(0,0,255));
+			Core.putText(outImage, String.valueOf(count), point, Core.FONT_HERSHEY_PLAIN, 1.0, new Scalar(0,0,255));
 			count += 1;
 		}
-		Highgui.imwrite("afterCentroids.png", originalImage);
+		Highgui.imwrite("afterCentroids.png", outImage);
 		
 		return centroids;
+	}
+	
+	/**
+	 * Transform image using centroids into a fixed 450x450 square
+	 * Algorithm derived from Abid Rahman K & nikie
+	 * http://stackoverflow.com/questions/10196198/how-to-remove-convexity-defects-in-a-sudoku-square
+	 * @param centroids Array of centroids
+	 * @param image Original sudoku image
+	 */
+	private void transformImage(ArrayList<Point> centroids, Mat image){
+		Mat outputImage = Mat.zeros(new Size(450,450), CvType.CV_32F);
+		// Modify each centroid
+		for (int row=0; row < 10; row ++){
+			for (int col=0; col < 10; col++){
+				if (col != 9 && row != 9){
+					int count = 0;
+					Mat transMat = new Mat(4, 2, CvType.CV_32F);
+					Mat outMat = new Mat(4, 2, CvType.CV_32F);
+					int[][] outArray = new int[][]{{col*50,row*50},{(col+1)*50-1,row*50},{col*50,(row+1)*50-1},{(col+1)*50-1,(row+1)*50-1}};
+					for (int ri = row; ri < row+2; ri++){
+						for (int ci = col; ci < col+2; ci++){
+							transMat.put(count, 0, centroids.get(ri*10+ci).x);
+							transMat.put(count, 1, centroids.get(ri*10+ci).y);
+							outMat.put(count, 0, outArray[count][0]);
+							outMat.put(count, 1, outArray[count][1]);
+							count += 1;
+						}
+					}
+					Mat transform = Imgproc.getPerspectiveTransform(transMat, outMat);
+					Mat tempImage = Mat.zeros(new Size(450,450), CvType.CV_32F);
+					Imgproc.warpPerspective(image, tempImage, transform, new Size(450,450));
+					
+					for (int x=row*50; x <(row+1)*50-1; x++){
+						for (int y=col*50; y <(col+1)*50-1; y++){
+							outputImage.put(x, y, tempImage.get(x,y));
+						}
+					}
+				}
+			}
+		}
+		Highgui.imwrite("morphedImage.png", outputImage);
 	}
 	
 }
