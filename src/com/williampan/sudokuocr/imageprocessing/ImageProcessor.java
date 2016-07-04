@@ -24,7 +24,7 @@ public class ImageProcessor {
 	/**
 	 * Process sudoku puzzle
 	 */
-	public void processImage(){
+	public Mat processImage(){
 		System.loadLibrary(Core.NATIVE_LIBRARY_NAME);
 		// Read in sudoku image file
 		File file = new File("cbhsudoku.jpg");
@@ -42,7 +42,7 @@ public class ImageProcessor {
 		Core.bitwise_and(vertImage, horImage, andImage);
 		Highgui.imwrite("afterBitAnd.png", andImage);
 		ArrayList<Point> centroids = findCentroids(andImage, maskedImage);
-		transformImage(centroids, maskedImage);
+		return transformImage(centroids, maskedImage);
 	}
 
 	/**
@@ -307,8 +307,8 @@ public class ImageProcessor {
 	 * @param centroids Array of centroids
 	 * @param image Original sudoku image
 	 */
-	private void transformImage(ArrayList<Point> centroids, Mat image){
-		Mat outputImage = Mat.zeros(new Size(450,450), CvType.CV_32F);
+	private Mat transformImage(ArrayList<Point> centroids, Mat image){
+		Mat outputImage = Mat.zeros(new Size(450,450), CvType.CV_8UC1);
 		// Modify each centroid
 		for (int row=0; row < 10; row ++){
 			for (int col=0; col < 10; col++){
@@ -339,6 +339,6 @@ public class ImageProcessor {
 			}
 		}
 		Highgui.imwrite("morphedImage.png", outputImage);
+		return outputImage;
 	}
-	
 }
