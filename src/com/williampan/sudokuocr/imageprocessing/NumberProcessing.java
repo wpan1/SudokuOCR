@@ -5,11 +5,14 @@ import java.awt.image.DataBufferByte;
 import java.io.File;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 
 import org.opencv.core.Core;
 import org.opencv.core.CvType;
 import org.opencv.core.Mat;
 import org.opencv.core.MatOfPoint;
+import org.opencv.core.Point;
 import org.opencv.core.Rect;
 import org.opencv.core.Scalar;
 import org.opencv.core.Size;
@@ -29,33 +32,70 @@ import net.sourceforge.tess4j.TesseractException;
 
 public class NumberProcessing {
 	
+	/**
+	 * Find singular square contours from image
+	 * @param image Image of sudoku
+	 * @return
+	 */
 	public ArrayList<MatOfPoint> processNumberContour(Mat image){
+		// List of potential squares
 		ArrayList<MatOfPoint> outMat = new ArrayList<MatOfPoint>();
 		// Image preproccesing
 		Mat processedImage = new Mat(image.size(), Core.DEPTH_MASK_ALL);
 		Imgproc.threshold(image, processedImage, 70, 255, Imgproc.THRESH_BINARY); 
-		
 		Imgproc.cvtColor(image, image, Imgproc.COLOR_GRAY2RGB); 
 		
 		Highgui.imwrite("beforeNumberContour.png", image);
-		
+		// Find all contours
 		ArrayList<MatOfPoint> contours = new ArrayList<MatOfPoint>();
 		Imgproc.findContours(processedImage, contours, new Mat(), Imgproc.RETR_LIST, Imgproc.CHAIN_APPROX_SIMPLE);
-
-		int count = 0;
+		
 		for (MatOfPoint contour : contours){
 			// Find sudoku singular square
 			if (Imgproc.contourArea(contour) > 1000){
 				outMat.add(contour);
 			}
-			count ++ ;
 		}
-		System.out.println(outMat.size());
+		
+		//Sorting output by order or sudoku
+		Collections.sort(outMat, new Comparator<MatOfPoint>() {
+				@Override
+				public int compare(MatOfPoint contour1, MatOfPoint contour2) {
+					Rect roi1 = Imgproc.boundingRect(contour1);
+					Rect roi2 = Imgproc.boundingRect(contour2);
+					// Not same line
+					if (Math.abs(roi2.y - roi1.y) > 10){
+						// Compare y values
+						if (roi2.y > roi1.y){
+							return -1;
+						}
+						return 1;
+					}
+					// Same line
+					else{
+						// Compare x values
+						if (roi2.x > roi1.x){
+							return -1;
+						}
+						return 1;
+					}
+				}
+		    });	
+		
 		Highgui.imwrite("afterNumberContour.png", image);
 		return outMat;
 	}
 	
-	public void recogniseNumber(ArrayList<MatOfPoint> contours, Mat image) throws TesseractException{
+	/**
+	 * Takes a list of contours and attempts to recognise the number
+	 * @param contours List of contours
+	 * @param image Original image
+	 * @throws TesseractException
+	 */
+	public ArrayList<Integer> recogniseNumber(ArrayList<MatOfPoint> contours, Mat image) throws TesseractException{
+		// Sudoku list
+		ArrayList<Integer> sudokuOut = new ArrayList<Integer>();
+		// Setting up Tesseract API
 		TessAPI1.TessBaseAPI handle = TessAPI1.TessBaseAPICreate();
 	    String treiningDataPath = "C:\\Tess4J\\";
 	    String lang = "eng";
@@ -65,6 +105,7 @@ public class NumberProcessing {
 		
 		int contCount = 0;		
 		for (MatOfPoint contour : contours){
+			// Mask image from contour
 			Rect roi = Imgproc.boundingRect(contour);
 			Mat mask = Mat.zeros(image.size(), CvType.CV_8U);
 			Imgproc.drawContours(mask, contours, contCount, new Scalar(255), Core.FILLED);
@@ -72,59 +113,42 @@ public class NumberProcessing {
 	        Mat imageROI = new Mat();
 	        image.copyTo(imageROI, mask);
 	        contourRegion = imageROI.submat(roi);
+	        // Process the contour region
 			Imgproc.cvtColor(contourRegion, contourRegion, Imgproc.COLOR_BGR2GRAY); 
 			Imgproc.adaptiveThreshold(contourRegion, contourRegion, 255, Imgproc.ADAPTIVE_THRESH_GAUSSIAN_C, Imgproc.THRESH_BINARY_INV, 101, 1);
-			
+			// Crop to remove border lines
 			Rect cropROI = new Rect(3,3,contourRegion.width()-6,contourRegion.height()-6);
 			contourRegion = contourRegion.submat(cropROI);
-			
-			Highgui.imwrite("contourRegion" + contCount + ".png", contourRegion);
+			// Convert to file usable for number recognition, Mat is not compatable
+			Highgui.imwrite("contourRegion.png", contourRegion);
 			Tesseract tess = new Tesseract();
 			tess.setLanguage("eng");
 			tess.setTessVariable("tessedit_char_whitelist", "123456789");
-			recogniseNumber(tess.doOCR(new File("contourRegion" + contCount + ".png")));
-	        		
-//			byte[] bytes = new byte[contourRegion.channels() * contourRegion.cols() * contourRegion.rows()];
-//			contourRegion.get(0, 0, bytes);
-//			BufferedImage img = new BufferedImage(contourRegion.cols(), contourRegion.rows(), BufferedImage.TYPE_3BYTE_BGR);
-//			final byte[] imageInBytes = ((DataBufferByte) img.getRaster().getDataBuffer()).getData();
-//			System.arraycopy(bytes, 0, imageInBytes, 0, bytes.length);
-//			
-//			TessAPI1.TessBaseAPISetImage(handle, ByteBuffer.wrap(imageInBytes), (int)contourRegion.width(), (int)contourRegion.height(), contourRegion.channels(), (int)contourRegion.step1());
-//			TessAPI1.TessBaseAPIRecognize(handle, null);
-//			Pointer out = TessAPI1.TessBaseAPIGetUTF8Text(handle);
-//			String tempStr = out.getString(0);
-//		    recogniseNumber(tempStr);
-		    
+			String outOCR = tess.doOCR(new File("contourRegion.png"));
+			// Add OCR value to sudoku list
+			if (outOCR.length() != 0){
+				sudokuOut.add(Character.getNumericValue(outOCR.charAt(0)));
+			}
+			else{
+				sudokuOut.add(0);
+			}
 		    contCount += 1;
 		}
+		
+		return sudokuOut;
 	}
-
-	private void recogniseNumber(String tempStr) {
-		if (tempStr.length() != 0){
-			char tempChar = tempStr.charAt(0);
-		    if(tempChar=='1')
-		        System.out.println(1);
-		    else if(tempChar=='2')
-		        System.out.println(2);
-		    else if(tempChar=='3')
-		        System.out.println(3);
-		    else if(tempChar=='4')
-		        System.out.println(4);
-		    else if(tempChar=='5')
-		        System.out.println(5);
-		    else if(tempChar=='6')
-		        System.out.println(6);
-		    else if(tempChar=='7')
-		        System.out.println(7);
-		    else if(tempChar=='8')
-		        System.out.println(8);
-		    else if(tempChar=='9')
-		        System.out.println(9);
-//		    else
-//		        System.out.println(0);
+	
+	public int[][] formatSudokuList(ArrayList<Integer> sudokuList) throws Exception{
+		if (sudokuList.size() != 81)
+			throw new Exception("Recognition Error");
+		int[][] sudokuArray = new int[9][9];
+		for (int row = 0; row < 9; row ++){
+			int[] rowArray = new int[9];
+			for (int col = 0; col < 9; col ++){
+				rowArray[col] = sudokuList.get(row*9 + col);
+			}
+			sudokuArray[row] = rowArray;
 		}
-//		else
-//		    System.out.println(0);
+		return sudokuArray;
 	}
 }
